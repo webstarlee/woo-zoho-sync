@@ -1,4 +1,4 @@
-import asyncio, json
+import asyncio, json, os
 from woocommerce import API
 
 from app.agents.postgres import PostgresAgent
@@ -97,3 +97,105 @@ class WcmAgent:
             await asyncio.sleep(0)  # Yield control back to event loop
             
         return f"Categories separated by levels and saved to categories_level_[0-{max(categories_by_level.keys())}].json"
+    
+    async def json_brands(self):
+        brands = []
+        page = 1
+        per_page = 20
+        
+        while True:
+            response = self.wcapi.get(
+                "products/brands",
+                params={
+                    "per_page": per_page,
+                    "page": page
+                }
+            )
+            
+            if response.status_code == 200:
+                current_brands = response.json()
+                if not current_brands:  # If no more brands are returned
+                    break
+                    
+                brands.extend(current_brands)
+                page += 1
+            else:
+                await asyncio.sleep(1)
+                continue
+        
+        filename = "brands/brands.json"
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(brands, f, indent=4, ensure_ascii=False)
+            
+        return f"Brands saved to {filename}"
+    
+    async def json_customers(self):
+        page = 1
+        per_page = 20
+        customers = []
+        current_file_number = 1
+        customers_per_file = 100
+        
+        while True:
+            response = self.wcapi.get(
+                "customers",
+                params={
+                    "per_page": per_page,
+                    "page": page
+                }
+            )
+            
+            if response.status_code == 200:
+                current_customers = response.json()
+                if not current_customers:  # If no more customers are returned
+                    break
+                
+                customers.extend(current_customers)
+                
+                # Write to file every 100 customers
+                while len(customers) >= customers_per_file:
+                    filename = f"customers/customers_{current_file_number}.json"
+                    batch = customers[:customers_per_file]
+                    customers = customers[customers_per_file:]
+                    
+                    with open(filename, 'w', encoding='utf-8') as f:
+                        json.dump(batch, f, indent=4, ensure_ascii=False)
+                    
+                    print(f"Saved {filename}")
+                    current_file_number += 1
+                
+                page += 1
+            else:
+                await asyncio.sleep(1)
+                continue
+        
+        # Write any remaining customers
+        if customers:
+            filename = f"customers/customers_{current_file_number}.json"
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(customers, f, indent=4, ensure_ascii=False)
+            print(f"Saved {filename}")
+            
+        return f"Customers saved to customers_1.json through customers_{current_file_number}.json"
+    
+    def filter_customers(self):
+        real_customers = []
+        count = 1
+        while True:
+            
+            if not os.path.exists(f"customers/customers_{count}.json"):
+                break
+            
+            with open(f"customers/customers_{count}.json", "r") as f:
+                customers = json.load(f)
+            
+            for customer in customers:
+                if customer["first_name"] != "" or customer["last_name"] != "":
+                    real_customers.append(customer)
+                
+            count += 1
+                
+        with open("customers/real_customers.json", "w", encoding="utf-8") as f:
+            json.dump(real_customers, f, indent=4, ensure_ascii=False)
+                
+        return f"Real customers saved to customers/real_customers.json"

@@ -5,6 +5,7 @@ import http.client
 from app.config import settings
 from app.agents.postgres import PostgresAgent
 from app.models.category import CategoryBase
+from app.schemas.customer import Customer
 
 class ZohoAgent:
     def __init__(self):
@@ -96,7 +97,6 @@ class ZohoAgent:
         return oauth_token.access_token
     
     async def get_categories(self):
-        print(settings.ZOHO_ORGANIZATION_ID)
         access_token = await self.get_access_token()
             
         conn = http.client.HTTPSConnection("www.zohoapis.eu")
@@ -130,4 +130,95 @@ class ZohoAgent:
         json_data = data.decode('utf-8')  # Convert bytes to string
         return json.loads(json_data)
         
+    async def get_brands(self):
+        access_token = await self.get_access_token()
+            
+        conn = http.client.HTTPSConnection("www.zohoapis.eu")
+
+        headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
+
+        conn.request("GET", f"/inventory/v1/brands?organization_id={settings.ZOHO_ORGANIZATION_ID}", headers=headers)
+
+        res = conn.getresponse()
+        data = res.read()
+        json_data = data.decode('utf-8')  # Convert bytes to string
+        return json.loads(json_data)
+    
+    async def get_customers(self):
+        access_token = await self.get_access_token()
+        
+        conn = http.client.HTTPSConnection("www.zohoapis.eu")
+        
+        headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
+        
+        conn.request("GET", f"/inventory/v1/contacts?organization_id={settings.ZOHO_ORGANIZATION_ID}", headers=headers)
+        
+        res = conn.getresponse()
+        data = res.read()
+        json_data = data.decode('utf-8')  # Convert bytes to string
+        return json.loads(json_data)
+    
+    async def create_customer(self, customer: Customer):
+        print(customer)
+        try:
+            access_token = await self.get_access_token()
+            
+            conn = http.client.HTTPSConnection("www.zohoapis.eu")
+            print(customer.billing_address)
+            payload = json.dumps({
+                "contact_name": customer.contact_name,
+                "company_name": customer.company_name,
+                "contact_type": customer.contact_type,
+                "billing_address": {
+                    "address": customer.billing_address.address,
+                    "city": customer.billing_address.city,
+                    "state": customer.billing_address.state,
+                    "zip": customer.billing_address.zip,
+                    "country": customer.billing_address.country
+                },
+                "shipping_address": {
+                    "address": customer.shipping_address.address,
+                    "city": customer.shipping_address.city,
+                    "state": customer.shipping_address.state,
+                    "zip": customer.shipping_address.zip,
+                    "country": customer.shipping_address.country
+                },
+                "contact_persons": [{
+                    "first_name": person.first_name,
+                    "last_name": person.last_name,
+                    "email": person.email,
+                    "is_primary_contact": person.is_primary_contact
+                } for person in customer.contact_persons]
+            })
+            
+            print(payload)
+            
+            headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
+            
+            conn.request("POST", f"/inventory/v1/contacts?organization_id={settings.ZOHO_ORGANIZATION_ID}", payload, headers)
+            
+            res = conn.getresponse()
+            data = res.read()
+            json_data = data.decode('utf-8')  # Convert bytes to string
+            
+            print(json_data)
+            return json.loads(json_data)
+        
+        except KeyError as e:
+            print(f"Error: Missing required field in customer data: {e}")
+            return {"error": str(e)}
+    
+    async def get_contact_persons(self):
+        access_token = await self.get_access_token()
+        
+        conn = http.client.HTTPSConnection("www.zohoapis.eu")
+        
+        headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
+        
+        conn.request("GET", f"/inventory/v1/contacts/686329000000279600/contactpersons?organization_id={settings.ZOHO_ORGANIZATION_ID}", headers=headers)
+        
+        res = conn.getresponse()
+        data = res.read()
+        json_data = data.decode('utf-8')  # Convert bytes to string
+        return json.loads(json_data)
         

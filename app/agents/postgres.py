@@ -4,7 +4,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from datetime import datetime
 
 from app.config import settings
-from app.models.OAuth import OAuth
+from app.models.oauth import OAuth
+from app.models.category import Category, CategoryBase
 
 class PostgresAgent:
     def __init__(self):
@@ -53,4 +54,28 @@ class PostgresAgent:
             statement = select(OAuth)
             result = (await db.exec(statement)).first()
             return result.refresh_token
+        return None
+    
+    async def insert_category(self, category: CategoryBase):
+        async for db in self.get_session():
+            db_category = Category(
+                name=category.name,
+                description=category.description,
+                url=category.url,
+                woo_id=category.woo_id,
+                woo_parent_id=category.woo_parent_id,
+                zoho_id=category.zoho_id,
+                zoho_parent_id=category.zoho_parent_id
+            )
+            db.add(db_category)
+            await db.commit()
+            await db.refresh(db_category)
+            return db_category
+        return None
+    
+    async def get_category_by_woo_id(self, woo_id: int):
+        async for db in self.get_session():
+            statement = select(Category).where(Category.woo_id == woo_id)
+            result = (await db.exec(statement)).first()
+            return result
         return None

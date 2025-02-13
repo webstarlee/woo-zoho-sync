@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     ZOHO_CLIENT_SECRET: str = os.getenv("ZOHO_CLIENT_SECRET", "00000000000000000000000000000000")
     ZOHO_REDIRECT_URI: str = os.getenv("ZOHO_REDIRECT_URI", "http://example.com/oauth/callback")
     ZOHO_ORGANIZATION_ID: str = os.getenv("ZOHO_ORGANIZATION_ID", "00000000000000000000000000000000")
+    WCM_CONSUMER_KEY: str = os.getenv("WCM_CONSUMER_KEY", "00000000000000000000000000000000")
+    WCM_CONSUMER_SECRET: str = os.getenv("WCM_CONSUMER_SECRET", "00000000000000000000000000000000")
+    WCM_URL: str = os.getenv("WCM_URL", "https://www.wcm.com")
     
     class Config:
         env_file = ".env"

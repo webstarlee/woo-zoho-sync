@@ -4,6 +4,7 @@ import http.client
 
 from app.config import settings
 from app.agents.postgres import PostgresAgent
+from app.models.category import CategoryBase
 
 class ZohoAgent:
     def __init__(self):
@@ -71,10 +72,9 @@ class ZohoAgent:
             return {"error": response_data}
         
         self.access_token = response_data["access_token"]
-        self.refresh_token = response_data["refresh_token"]
         self.expires_at = datetime.now() + timedelta(seconds=response_data["expires_in"])
         
-        result = await self.postgres_agent.update_oauth(self.access_token, self.refresh_token, self.expires_at)
+        result = await self.postgres_agent.update_oauth(self.access_token, refresh_token, self.expires_at)
         
         if not result:
             return {"error": "Failed to update OAuth token"}
@@ -110,13 +110,15 @@ class ZohoAgent:
         json_data = data.decode('utf-8')  # Convert bytes to string
         return json.loads(json_data)
     
-    async def create_category(self, name: str):
+    async def create_category(self, category: CategoryBase):
         access_token = await self.get_access_token()
             
         conn = http.client.HTTPSConnection("www.zohoapis.eu")
         
         payload = json.dumps({
-            "name": name
+            "name": category.name,
+            "url": category.url,
+            "parent_category_id": category.zoho_parent_id
         })
 
         headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }

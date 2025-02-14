@@ -199,3 +199,53 @@ class WcmAgent:
             json.dump(real_customers, f, indent=4, ensure_ascii=False)
                 
         return f"Real customers saved to customers/real_customers.json"
+    
+    async def json_products(self):
+        products = []
+        page = 1
+        per_page = 20
+        current_file_number = 1
+        products_per_file = 100
+        
+        while True:
+            response = self.wcapi.get(
+                "products",
+                params={
+                    "per_page": per_page,
+                    "page": page,
+                    "status": "publish",
+                    "type": "simple"
+                }
+            )
+            
+            if response.status_code == 200:
+                current_products = response.json()
+                if not current_products:
+                    break
+                
+                products.extend(current_products)
+                
+                while len(products) >= products_per_file:
+                    filename = f"products/products_{current_file_number}.json"
+                    batch = products[:products_per_file]
+                    products = products[products_per_file:]
+                    
+                    with open(filename, 'w', encoding='utf-8') as f:
+                        json.dump(batch, f, indent=4, ensure_ascii=False)
+                    
+                    print(f"Saved {filename}")
+                    current_file_number += 1
+                
+                page += 1
+            else:
+                await asyncio.sleep(1)
+                continue
+        
+        # Write any remaining products
+        if products:
+            filename = f"products/products_{current_file_number}.json"
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(products, f, indent=4, ensure_ascii=False)
+            print(f"Saved {filename}")
+            
+        return f"Products saved to products_1.json through products_{current_file_number}.json"

@@ -3,18 +3,17 @@ import json
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from app.agents.zoho import ZohoAgent
-from app.agents.wcm import WcmAgent
 from app.config import settings
-from app.sync.customer import sync_customers
+from app.sync.item import create_items
 
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     customer_task = asyncio.create_task(sync_customers())
-#     app.state.customer_task = customer_task
-#     yield
-#     customer_task.cancel()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    item_task = asyncio.create_task(create_items())
+    app.state.item_task = item_task
+    yield
+    item_task.cancel()
 
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/oauth/callback")
 async def oauth_callback(request: Request):
@@ -35,45 +34,25 @@ def refresh():
     
     return result
 
-@app.get("/brands")
-async def get_brands():
-    result = await ZohoAgent().get_brands()
+@app.get("/items")
+async def get_items():
+    result = await ZohoAgent().get_items()
     
     return result
 
-@app.get("/brands/json")
-async def get_brands_json():
-    result = await WcmAgent().json_brands()
+@app.get("/taxes")
+async def get_taxes():
+    result = await ZohoAgent().get_taxes()
     
-    return result
-
-@app.get("/customers")
-async def get_customers():
-    result = await ZohoAgent().get_customers()
+    taxes = []
     
-    return result
-
-@app.get("/customers/json")
-async def get_customers_json():
-    result = await WcmAgent().json_customers()
+    for tax in result['taxes']:
+        taxes.append({
+            'id': tax['tax_id'],
+            'name': tax['tax_name'],
+            'rate': tax['tax_percentage']
+        })
     
-    return result
-
-@app.get("/customers/count")
-async def get_customers_count():
-    with open("customers/real_customers.json", "r") as f:
-        customers = json.load(f)
-    
-    return len(customers)
-
-@app.get("/customers/real")
-def get_customers_real():
-    result = WcmAgent().filter_customers()
-    
-    return result
-
-@app.get("/contact_persons")
-async def get_contact_persons():
-    result = await ZohoAgent().get_contact_persons()
-    
-    return result
+    with open('taxes.json', 'w') as f:
+        json.dump(taxes, f, indent=4, ensure_ascii=False)
+    return taxes

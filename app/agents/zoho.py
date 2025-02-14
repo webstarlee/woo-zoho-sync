@@ -1,4 +1,4 @@
-import httpx, json
+import httpx, json, requests, io
 from datetime import datetime, timedelta
 import http.client
 
@@ -6,7 +6,7 @@ from app.config import settings
 from app.agents.postgres import PostgresAgent
 from app.models.category import CategoryBase
 from app.schemas.customer import Customer
-
+from app.schemas.item import Item
 class ZohoAgent:
     def __init__(self):
         self.access_token = None
@@ -216,6 +216,138 @@ class ZohoAgent:
         headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
         
         conn.request("GET", f"/inventory/v1/contacts/686329000000279600/contactpersons?organization_id={settings.ZOHO_ORGANIZATION_ID}", headers=headers)
+        
+        res = conn.getresponse()
+        data = res.read()
+        json_data = data.decode('utf-8')  # Convert bytes to string
+        return json.loads(json_data)
+    
+    async def get_items(self):
+        print(settings.ZOHO_ORGANIZATION_ID)
+        access_token = await self.get_access_token()
+        
+        conn = http.client.HTTPSConnection("www.zohoapis.eu")
+        
+        headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
+        
+        conn.request("GET", f"/inventory/v1/items?organization_id={settings.ZOHO_ORGANIZATION_ID}", headers=headers)
+        
+        res = conn.getresponse()
+        data = res.read()
+        json_data = data.decode('utf-8')  # Convert bytes to string
+        return json.loads(json_data)
+    
+    async def create_item(self, item: Item):
+        access_token = await self.get_access_token()
+        
+        conn = http.client.HTTPSConnection("www.zohoapis.eu")
+        
+        payload = json.dumps(item.model_dump())
+        
+        headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
+        
+        conn.request("POST", f"/inventory/v1/items?organization_id={settings.ZOHO_ORGANIZATION_ID}", payload, headers)
+        
+        res = conn.getresponse()
+        status_code = res.status
+        print(status_code)
+        if status_code == 429:
+            return {"limit_exceeded": True}
+        else:
+            data = res.read()
+            json_data = data.decode('utf-8')  # Convert bytes to string
+            return json.loads(json_data)
+    
+    async def upload_image(self, images: list, item_id: str):
+        try:
+            access_token = await self.get_access_token()
+            conn = http.client.HTTPSConnection("www.zohoapis.eu")
+            
+            results = []
+            # Handle each image separately
+            for index, image in enumerate(images):
+                try:
+                    image_response = requests.get(image['src'])
+                    image_response.raise_for_status()
+                except requests.exceptions.RequestException as e:
+                    print(f"Error downloading image from {image['src']}: {str(e)}")
+                    results.append({"error": f"Failed to download image {index + 1}: {str(e)}"})
+                    continue
+                
+                image_data = image_response.content
+                
+                # Determine image format from URL or content type
+                content_type = image_response.headers.get('content-type', '')
+                if 'webp' in content_type.lower():
+                    ext = 'webp'
+                elif 'jpeg' in content_type.lower() or 'jpg' in content_type.lower():
+                    ext = 'jpg'
+                elif 'png' in content_type.lower():
+                    ext = 'png'
+                else:
+                    # Try to get extension from URL
+                    url_ext = image['src'].split('.')[-1].lower()
+                    if url_ext in ['jpg', 'jpeg', 'png', 'webp']:
+                        ext = 'jpg' if url_ext == 'jpeg' else url_ext
+                    else:
+                        ext = 'jpg'  # default to jpg if format cannot be determined
+                
+                # Create multipart form data for each image
+                boundary = b'boundary123'
+                body = []
+                
+                body.extend([
+                    b'--' + boundary,
+                    f'Content-Disposition: form-data; name="image"; filename="item_{item_id}_{index + 1}.{ext}"'.encode(),
+                    f'Content-Type: image/{ext}'.encode(),
+                    b'',
+                    image_data,
+                ])
+                
+                body.extend([
+                    b'--' + boundary + b'--',
+                    b'',
+                ])
+                
+                body = b'\r\n'.join(body)
+                
+                headers = {
+                    'Authorization': f"Zoho-oauthtoken {access_token}",
+                    'Content-Type': f'multipart/form-data; boundary={boundary.decode()}'
+                }
+                
+                try:
+                    conn.request("POST", 
+                               f"/inventory/v1/items/{item_id}/images?organization_id={settings.ZOHO_ORGANIZATION_ID}", 
+                               body=body,
+                               headers=headers)
+                    res = conn.getresponse()
+                    data = res.read()
+                    json_data = data.decode('utf-8')
+                    
+                    if res.status >= 400:
+                        results.append({"error": f"Zoho API error for image {index + 1}: {json_data}"})
+                    else:
+                        results.append(json.loads(json_data))
+                    
+                except (http.client.HTTPException, json.JSONDecodeError) as e:
+                    print(f"Error uploading image {index + 1} to Zoho: {str(e)}")
+                    results.append({"error": f"Failed to upload image {index + 1}: {str(e)}"})
+            
+            return results
+            
+        except Exception as e:
+            print(f"Unexpected error: {str(e)}")
+            return {"error": f"Unexpected error: {str(e)}"}
+    
+    async def get_taxes(self):
+        access_token = await self.get_access_token()
+        
+        conn = http.client.HTTPSConnection("www.zohoapis.eu")
+        
+        headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
+        
+        conn.request("GET", f"/inventory/v1/settings/taxes?organization_id={settings.ZOHO_ORGANIZATION_ID}", headers=headers)
         
         res = conn.getresponse()
         data = res.read()

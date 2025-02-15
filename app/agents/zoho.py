@@ -250,12 +250,12 @@ class ZohoAgent:
         
         res = conn.getresponse()
         status_code = res.status
-        print(status_code)
         if status_code == 429:
             return {"limit_exceeded": True}
         else:
             data = res.read()
             json_data = data.decode('utf-8')  # Convert bytes to string
+            print(json_data)
             return json.loads(json_data)
     
     async def upload_image(self, images: list, item_id: str):

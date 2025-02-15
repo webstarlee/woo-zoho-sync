@@ -5,8 +5,8 @@ from app.agents.postgres import PostgresAgent
 from app.schemas.item import Item
 
 async def create_items():
-    count = 43
-    total_count = 4200
+    count = 87
+    total_count = 8600
     errors = []
     limit_exceeded = False
     

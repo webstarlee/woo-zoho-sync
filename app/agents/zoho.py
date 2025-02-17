@@ -1,6 +1,7 @@
 import httpx, json, requests, io
 from datetime import datetime, timedelta
 import http.client
+from PIL import Image  # Add this import at the top of the file
 
 from app.config import settings
 from app.agents.postgres import PostgresAgent
@@ -223,19 +224,41 @@ class ZohoAgent:
         return json.loads(json_data)
     
     async def get_items(self):
-        print(settings.ZOHO_ORGANIZATION_ID)
-        access_token = await self.get_access_token()
+        page = 1
+        per_page = 100  # Items per page
+        file_number = 0
         
-        conn = http.client.HTTPSConnection("www.zohoapis.eu")
-        
-        headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
-        
-        conn.request("GET", f"/inventory/v1/items?organization_id={settings.ZOHO_ORGANIZATION_ID}", headers=headers)
-        
-        res = conn.getresponse()
-        data = res.read()
-        json_data = data.decode('utf-8')  # Convert bytes to string
-        return json.loads(json_data)
+        while True:
+            access_token = await self.get_access_token()
+            conn = http.client.HTTPSConnection("www.zohoapis.eu")
+            
+            headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
+            
+            conn.request("GET", f"/inventory/v1/items?organization_id={settings.ZOHO_ORGANIZATION_ID}&page={page}&per_page={per_page}", headers=headers)
+            
+            res = conn.getresponse()
+            data = res.read()
+            json_data = json.loads(data.decode('utf-8'))
+            
+            # Check if we have items in the response
+            if 'items' not in json_data or not json_data['items']:
+                break
+                
+            # Save current batch to a JSON file
+            filename = f"zoho_items/items_{file_number}.json"
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(json_data['items'], f, indent=4, ensure_ascii=False)
+                
+            print(f"Saved batch {file_number} with {len(json_data['items'])} items to {filename}")
+            
+            # Check if we've reached the last page
+            if len(json_data['items']) < per_page:
+                break
+                
+            page += 1
+            file_number += 1
+            
+        print(f"Successfully saved {file_number} batches of items")
     
     async def create_item(self, item: Item):
         access_token = await self.get_access_token()
@@ -255,89 +278,89 @@ class ZohoAgent:
         else:
             data = res.read()
             json_data = data.decode('utf-8')  # Convert bytes to string
-            print(json_data)
             return json.loads(json_data)
     
     async def upload_image(self, images: list, item_id: str):
         try:
             access_token = await self.get_access_token()
-            conn = http.client.HTTPSConnection("www.zohoapis.eu")
-            
             results = []
-            # Handle each image separately
-            for index, image in enumerate(images):
-                try:
-                    image_response = requests.get(image['src'])
-                    image_response.raise_for_status()
-                except requests.exceptions.RequestException as e:
-                    print(f"Error downloading image from {image['src']}: {str(e)}")
-                    results.append({"error": f"Failed to download image {index + 1}: {str(e)}"})
-                    continue
-                
-                image_data = image_response.content
-                
-                # Determine image format from URL or content type
-                content_type = image_response.headers.get('content-type', '')
-                if 'webp' in content_type.lower():
-                    ext = 'webp'
-                elif 'jpeg' in content_type.lower() or 'jpg' in content_type.lower():
-                    ext = 'jpg'
-                elif 'png' in content_type.lower():
-                    ext = 'png'
-                else:
-                    # Try to get extension from URL
-                    url_ext = image['src'].split('.')[-1].lower()
-                    if url_ext in ['jpg', 'jpeg', 'png', 'webp']:
-                        ext = 'jpg' if url_ext == 'jpeg' else url_ext
-                    else:
-                        ext = 'jpg'  # default to jpg if format cannot be determined
-                
-                # Create multipart form data for each image
-                boundary = b'boundary123'
-                body = []
-                
-                body.extend([
-                    b'--' + boundary,
-                    f'Content-Disposition: form-data; name="image"; filename="item_{item_id}_{index + 1}.{ext}"'.encode(),
-                    f'Content-Type: image/{ext}'.encode(),
-                    b'',
-                    image_data,
-                ])
-                
-                body.extend([
-                    b'--' + boundary + b'--',
-                    b'',
-                ])
-                
-                body = b'\r\n'.join(body)
-                
-                headers = {
-                    'Authorization': f"Zoho-oauthtoken {access_token}",
-                    'Content-Type': f'multipart/form-data; boundary={boundary.decode()}'
-                }
-                
-                try:
-                    conn.request("POST", 
-                               f"/inventory/v1/items/{item_id}/images?organization_id={settings.ZOHO_ORGANIZATION_ID}", 
-                               body=body,
-                               headers=headers)
-                    res = conn.getresponse()
-                    data = res.read()
-                    json_data = data.decode('utf-8')
-                    
-                    if res.status >= 400:
-                        results.append({"error": f"Zoho API error for image {index + 1}: {json_data}"})
-                    else:
-                        results.append(json.loads(json_data))
-                    
-                except (http.client.HTTPException, json.JSONDecodeError) as e:
-                    print(f"Error uploading image {index + 1} to Zoho: {str(e)}")
-                    results.append({"error": f"Failed to upload image {index + 1}: {str(e)}"})
             
+            async with httpx.AsyncClient() as client:
+                for index, image in enumerate(images):
+                    try:
+                        # Download image
+                        response = await client.get(image['src'])
+                        response.raise_for_status()
+                        image_data = response.content
+                        content_type = response.headers.get('content-type', '').lower()
+                        url_lower = image['src'].lower()
+
+                        # Determine image format
+                        if 'jpeg' in content_type or 'jpg' in content_type or url_lower.endswith(('.jpg', '.jpeg')):
+                            ext = 'jpg'
+                        elif 'png' in content_type or url_lower.endswith('.png'):
+                            ext = 'png'
+                        else:
+                            # Convert other formats (including WebP) to JPG
+                            try:
+                                image_buffer = io.BytesIO(image_data)
+                                if url_lower.endswith('.avif'):
+                                    try:
+                                        import pillow_avif  # Required for AVIF support
+                                        img = Image.open(image_buffer)
+                                    except ImportError:
+                                        results.append({"error": f"AVIF support not available for image {index + 1}"})
+                                        continue
+                                else:
+                                    img = Image.open(image_buffer)
+
+                                # Convert to RGB and handle alpha channel
+                                if img.mode in ('RGBA', 'LA'):
+                                    background = Image.new('RGB', img.size, (255, 255, 255))
+                                    background.paste(img, mask=img.split()[-1])
+                                    img = background
+                                elif img.mode != 'RGB':
+                                    img = img.convert('RGB')
+
+                                output_buffer = io.BytesIO()
+                                img.save(output_buffer, format='JPEG', quality=85, optimize=True)
+                                image_data = output_buffer.getvalue()
+                                ext = 'jpg'
+                                
+                            except Exception as e:
+                                results.append({"error": f"Failed to convert image {index + 1}: {str(e)}"})
+                                continue
+
+                        # Prepare multipart form data
+                        files = {
+                            'image': (
+                                f'item_{item_id}_{index + 1}.{ext}',
+                                image_data,
+                                f'image/{ext}'
+                            )
+                        }
+                        
+                        # Upload to Zoho
+                        upload_response = await client.post(
+                            f"https://www.zohoapis.eu/inventory/v1/items/{item_id}/images",
+                            params={'organization_id': settings.ZOHO_ORGANIZATION_ID},
+                            headers={'Authorization': f"Zoho-oauthtoken {access_token}"},
+                            files=files
+                        )
+
+                        if upload_response.status_code >= 400:
+                            results.append({
+                                "error": f"Zoho API error for image {index + 1}: {upload_response.text}"
+                            })
+                        else:
+                            results.append(upload_response.json())
+
+                    except httpx.RequestError as e:
+                        results.append({"error": f"Failed to process image {index + 1}: {str(e)}"})
+
             return results
-            
+
         except Exception as e:
-            print(f"Unexpected error: {str(e)}")
             return {"error": f"Unexpected error: {str(e)}"}
     
     async def get_taxes(self):

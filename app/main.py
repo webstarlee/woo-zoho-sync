@@ -1,14 +1,15 @@
 import asyncio
-import json
+import json, os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from app.agents.zoho import ZohoAgent
 from app.config import settings
-from app.sync.item import create_items
+from app.sync.item import sync_unsynced_items
+from app.agents.wcm import WcmAgent
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    item_task = asyncio.create_task(create_items())
+    item_task = asyncio.create_task(sync_unsynced_items())
     app.state.item_task = item_task
     yield
     item_task.cancel()
@@ -56,3 +57,30 @@ async def get_taxes():
     with open('taxes.json', 'w') as f:
         json.dump(taxes, f, indent=4, ensure_ascii=False)
     return taxes
+
+
+@app.get("/products/delete")
+async def delete_products():
+    count = 0
+    while True:
+        file_path = f"zoho_items/items_{count}.json"
+        if not os.path.exists(file_path):
+            break
+        
+        os.remove(file_path)
+        count += 1
+        
+    return {"message": f"{count} files deleted"}
+
+# @app.get("/products/rename")
+# async def rename_products():
+#     count = 0
+#     while True:
+#         file_path = f"products/renamed_products_{count}.json"
+#         if not os.path.exists(file_path):
+#             break
+#         os.rename(file_path, f"products/products_{count}.json")
+#         count += 1
+#     return {"message": f"{count} files renamed"}
+        
+        

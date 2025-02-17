@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     WCM_CONSUMER_KEY: str = os.getenv("WCM_CONSUMER_KEY", "00000000000000000000000000000000")
     WCM_CONSUMER_SECRET: str = os.getenv("WCM_CONSUMER_SECRET", "00000000000000000000000000000000")
     WCM_URL: str = os.getenv("WCM_URL", "https://www.wcm.com")
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "00000000000000000000000000000000")
     
     class Config:
         env_file = ".env"

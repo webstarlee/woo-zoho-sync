@@ -249,3 +249,149 @@ class WcmAgent:
             print(f"Saved {filename}")
             
         return f"Products saved to products_1.json through products_{current_file_number}.json"
+    
+    async def clean_products(self):
+        cleaned_products = []
+        count = 1
+        current_file_number = 1
+        products_per_file = 100
+        
+        while True:
+            if not os.path.exists(f"products/products_{count}.json"):
+                break
+            
+            with open(f"products/products_{count}.json", "r") as f:
+                products = json.load(f)
+            
+            for product in products:
+                # Remove unwanted fields
+                product.pop('meta_data', None)
+                product.pop('yoast_head', None)
+                product.pop('price_html', None)
+                product.pop('yoast_head_json', None)
+                cleaned_products.append(product)
+                
+                # Write to file every 100 products
+                while len(cleaned_products) >= products_per_file:
+                    filename = f"products/cleaned_products_{current_file_number}.json"
+                    batch = cleaned_products[:products_per_file]
+                    cleaned_products = cleaned_products[products_per_file:]
+                    
+                    with open(filename, 'w', encoding='utf-8') as f:
+                        json.dump(batch, f, indent=4, ensure_ascii=False)
+                    
+                    print(f"Saved {filename}")
+                    current_file_number += 1
+            
+            count += 1
+        
+        # Write any remaining products
+        if cleaned_products:
+            filename = f"products/cleaned_products_{current_file_number}.json"
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(cleaned_products, f, indent=4, ensure_ascii=False)
+            print(f"Saved {filename}")
+        
+        return f"Products cleaned and saved to cleaned_products_1.json through cleaned_products_{current_file_number}.json"
+    
+    async def check_duplicates(self):
+        all_products = []
+        new_products = []
+        seen_skus = set()
+        
+        # Read all products from JSON files
+        count = 1
+        while True:
+            file_path = f"products/cleaned_products_{count}.json"
+            if not os.path.exists(file_path):
+                break
+            
+            with open(file_path, "r") as f:
+                products = json.load(f)
+                all_products.extend(products)
+            count += 1
+        
+        # Check for duplicates and unique products
+        print(f"Found {len(all_products)} products")
+        for product in all_products:
+            if not product["sku"] in seen_skus:
+                seen_skus.add(product["sku"])
+                new_products.append(product)
+        
+        def make_chunks(products, chunk_size):
+            for i in range(0, len(products), chunk_size):
+                yield products[i:i + chunk_size]
+        
+        chunks = list(make_chunks(new_products, 100))
+        
+        for index, chunk in enumerate(chunks):
+            with open(f"products/new_products_{index}.json", "w", encoding="utf-8") as f:
+                json.dump(chunk, f, indent=4, ensure_ascii=False)
+            print(f"Saved chunk {index}")
+        
+        return f"New products saved to new_products_0.json through new_products_{len(chunks) - 1}.json"
+
+    async def check_duplicates_names(self):
+        all_products = []
+        new_products = []
+        seen_names = set()
+        
+        count = 0
+        
+        while True:
+            file_path = f"products/new_products_{count}.json"
+            if not os.path.exists(file_path):
+                break
+            
+            with open(file_path, "r") as f:
+                products = json.load(f)
+                all_products.extend(products)
+            count += 1
+        
+        print(f"Found {len(all_products)} products")
+        for product in all_products:
+            base_name = product["name"]
+            counter = 2
+            while product["name"] in seen_names:
+                product["name"] = f"{base_name} ({counter})"
+                counter += 1
+            seen_names.add(product["name"])
+            new_products.append(product)
+        
+        # Save updated products in chunks of 100
+        def make_chunks(products, chunk_size):
+            for i in range(0, len(products), chunk_size):
+                yield products[i:i + chunk_size]
+        
+        chunks = list(make_chunks(new_products, 100))
+        
+        for index, chunk in enumerate(chunks):
+            filename = f"products/renamed_products_{index}.json"
+            with open(filename, "w", encoding="utf-8") as f:
+                json.dump(chunk, f, indent=4, ensure_ascii=False)
+            print(f"Saved {filename}")
+        
+        return f"Renamed products saved to renamed_products_0.json through renamed_products_{len(chunks) - 1}.json"
+    
+    async def check_duplicates_total(self):
+        count = 0
+        seen_names = []
+        duplicates = 0
+        while True:
+            file_path = f"products/products_{count}.json"
+            if not os.path.exists(file_path):
+                break
+            
+            with open(file_path, "r") as f:
+                products = json.load(f)
+            
+            for product in products:
+                if product["name"] in seen_names:
+                    print(f"Duplicate name found: {product['name']}")
+                    duplicates += 1
+                else:
+                    seen_names.append(product["name"])
+            count += 1
+            
+        print(f"Checked {count} files, found {duplicates} duplicates")
+            

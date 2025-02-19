@@ -8,6 +8,8 @@ from app.agents.postgres import PostgresAgent
 from app.models.category import CategoryBase
 from app.schemas.customer import Customer
 from app.schemas.item import Item
+from app.schemas.item_group import ItemGroup
+
 class ZohoAgent:
     def __init__(self):
         self.access_token = None
@@ -376,4 +378,80 @@ class ZohoAgent:
         data = res.read()
         json_data = data.decode('utf-8')  # Convert bytes to string
         return json.loads(json_data)
+    
+    async def get_item_groups(self):
+        access_token = await self.get_access_token()
         
+        conn = http.client.HTTPSConnection("www.zohoapis.eu")
+        
+        headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
+        
+        conn.request("GET", f"/inventory/v1/itemgroups?organization_id={settings.ZOHO_ORGANIZATION_ID}", headers=headers)
+        
+        res = conn.getresponse()
+        data = res.read()
+        json_data = data.decode('utf-8')  # Convert bytes to string
+        return json.loads(json_data)
+    
+    async def get_item_by_id(self, item_id: str):
+        access_token = await self.get_access_token()
+        
+        conn = http.client.HTTPSConnection("www.zohoapis.eu")
+        
+        headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
+        
+        conn.request("GET", f"/inventory/v1/items/{item_id}?organization_id={settings.ZOHO_ORGANIZATION_ID}", headers=headers)
+        
+        res = conn.getresponse()
+        data = res.read()
+        json_data = data.decode('utf-8')  # Convert bytes to string
+        return json.loads(json_data)
+    
+    async def create_item_group(self, item_group: ItemGroup):
+        access_token = await self.get_access_token()
+        
+        conn = http.client.HTTPSConnection("www.zohoapis.eu")
+        
+        payload = json.dumps({
+            "group_name": item_group.group_name,
+            "brand": item_group.brand,
+            "manufacturer": item_group.manufacturer,
+            "unit": item_group.unit,
+            "description": item_group.description,
+            "tax_id": item_group.tax_id,
+            "attribute_name1": item_group.attribute_name1,
+            "category_id": item_group.category_id,
+            "items": [{
+                "name": item.name,
+                "rate": item.rate,
+                "purchase_rate": item.purchase_rate,
+                "initial_stock": item.initial_stock,
+                "initial_stock_rate": item.initial_stock_rate,
+                "stock_on_hand": item.stock_on_hand,
+                "available_stock": item.available_stock,
+                "actual_available_stock": item.actual_available_stock,
+                "sku": item.sku,
+                "attribute_option_name1": item.attribute_option_name1
+            } for item in item_group.items],
+            "attributes": [{
+                "name": attribute.name,
+                "options": [{
+                    "name": option.name
+                } for option in attribute.options]
+            } for attribute in item_group.attributes]
+        })
+        
+        print(payload)
+        
+        headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
+        
+        conn.request("POST", f"/inventory/v1/itemgroups?organization_id={settings.ZOHO_ORGANIZATION_ID}", payload, headers)
+        
+        res = conn.getresponse()
+        status_code = res.status
+        if status_code == 429:
+            return {"limit_exceeded": True}
+        else:
+            data = res.read()
+            json_data = data.decode('utf-8')
+            return json.loads(json_data)

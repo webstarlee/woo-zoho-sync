@@ -5,14 +5,15 @@ from fastapi import FastAPI, Request
 from app.agents.zoho import ZohoAgent
 from app.config import settings
 from app.sync.item import sync_unsynced_items
+from app.sync.item_group import create_item_groups
 from app.agents.wcm import WcmAgent
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    item_task = asyncio.create_task(sync_unsynced_items())
-    app.state.item_task = item_task
+    variable_products_task = asyncio.create_task(create_item_groups())
+    app.state.variable_products_task = variable_products_task
     yield
-    item_task.cancel()
+    variable_products_task.cancel()
 
 app = FastAPI(lifespan=lifespan)
 
@@ -71,6 +72,18 @@ async def delete_products():
         count += 1
         
     return {"message": f"{count} files deleted"}
+
+@app.get("/item_groups")
+async def get_item_groups():
+    result = await ZohoAgent().get_item_groups()
+    
+    return result
+
+@app.get("/item/{item_id}")
+async def get_item(item_id: str):
+    result = await ZohoAgent().get_item_by_id(item_id)
+    
+    return result
 
 # @app.get("/products/rename")
 # async def rename_products():

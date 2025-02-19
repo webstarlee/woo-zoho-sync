@@ -257,10 +257,10 @@ class WcmAgent:
         products_per_file = 100
         
         while True:
-            if not os.path.exists(f"products/products_{count}.json"):
+            if not os.path.exists(f"variable_products/variable_products_{count}.json"):
                 break
             
-            with open(f"products/products_{count}.json", "r") as f:
+            with open(f"variable_products/variable_products_{count}.json", "r") as f:
                 products = json.load(f)
             
             for product in products:
@@ -273,7 +273,7 @@ class WcmAgent:
                 
                 # Write to file every 100 products
                 while len(cleaned_products) >= products_per_file:
-                    filename = f"products/cleaned_products_{current_file_number}.json"
+                    filename = f"variable_products/products_{current_file_number}.json"
                     batch = cleaned_products[:products_per_file]
                     cleaned_products = cleaned_products[products_per_file:]
                     
@@ -287,12 +287,12 @@ class WcmAgent:
         
         # Write any remaining products
         if cleaned_products:
-            filename = f"products/cleaned_products_{current_file_number}.json"
+            filename = f"variable_products/products_{current_file_number}.json"
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(cleaned_products, f, indent=4, ensure_ascii=False)
             print(f"Saved {filename}")
         
-        return f"Products cleaned and saved to cleaned_products_1.json through cleaned_products_{current_file_number}.json"
+        return f"Products cleaned and saved to products_1.json through products_{current_file_number}.json"
     
     async def check_duplicates(self):
         all_products = []
@@ -394,4 +394,139 @@ class WcmAgent:
             count += 1
             
         print(f"Checked {count} files, found {duplicates} duplicates")
+    
+    async def get_variable_products(self):
+        products = []
+        page = 1
+        per_page = 20
+        current_file_number = 1
+        products_per_file = 100
+        
+        while True:
+            response = self.wcapi.get(
+                "products",
+                params={
+                    "per_page": per_page,
+                    "page": page,
+                    "status": "publish",
+                    "type": "variable"
+                }
+            )
             
+            if response.status_code == 200:
+                current_products = response.json()
+                if not current_products:
+                    break
+                
+                products.extend(current_products)
+                
+                while len(products) >= products_per_file:
+                    filename = f"variable_products/variable_products_{current_file_number}.json"
+                    batch = products[:products_per_file]
+                    products = products[products_per_file:]
+                    
+                    with open(filename, 'w', encoding='utf-8') as f:
+                        json.dump(batch, f, indent=4, ensure_ascii=False)
+                    
+                    print(f"Saved {filename}")
+                    current_file_number += 1
+                
+                page += 1
+            else:
+                await asyncio.sleep(1)
+                continue
+        
+        # Write any remaining products
+        if products:
+            filename = f"variable_products/variable_products_{current_file_number}.json"
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(products, f, indent=4, ensure_ascii=False)
+            print(f"Saved {filename}")
+            
+        print(f"Products saved to products_1.json through products_{current_file_number}.json")
+    
+    async def get_attributes(self):
+        attributes = []
+        page = 1
+        per_page = 20
+        current_file_number = 1
+        attributes_per_file = 100
+        
+        while True:
+            response = self.wcapi.get(
+                "products/attributes",
+                params={
+                    "per_page": per_page,
+                    "page": page
+                }
+            )
+            
+            if response.status_code == 200:
+                current_attributes = response.json()
+                if not current_attributes:
+                    break
+                    
+                attributes.extend(current_attributes)
+                
+                while len(attributes) >= attributes_per_file:
+                    filename = f"attributes/attributes_{current_file_number}.json"
+                    batch = attributes[:attributes_per_file]
+                    attributes = attributes[attributes_per_file:]
+                    
+                    with open(filename, 'w', encoding='utf-8') as f:
+                        json.dump(batch, f, indent=4, ensure_ascii=False)
+                    
+                    print(f"Saved {filename}")
+                    current_file_number += 1
+                
+                page += 1
+            else:
+                await asyncio.sleep(1)
+                continue
+                    
+        if attributes:
+            filename = f"attributes/attributes_{current_file_number}.json"
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(attributes, f, indent=4, ensure_ascii=False)
+            print(f"Saved {filename}")
+            
+        return f"Attributes saved to attributes_1.json through attributes_{current_file_number}.json"
+    
+    async def get_product_variations(self):
+        print("Getting product variations")
+        count = 1
+
+        # Ensure variations directory exists
+        os.makedirs("variations", exist_ok=True)
+        
+        while True:
+            print(f"Getting variations for product {count}")
+            file_path = f"variable_products/products_{count}.json"
+            if not os.path.exists(file_path):
+                print(f"File {file_path} does not exist")
+                break
+            
+            print(f"File {file_path} exists")
+            with open(file_path, "r") as f:
+                products = json.load(f)
+            
+            for product in products:
+                try:
+                    response = self.wcapi.get(
+                        f"products/{product['id']}/variations"
+                    )
+                    # Add delay to avoid rate limiting
+                    await asyncio.sleep(0.5)  # 500ms delay between requests
+                    
+                    response.raise_for_status()  # Raise exception for bad status codes
+                    variations = response.json()
+                    
+                    filename = f"variations/variations_{product['id']}.json"
+                    with open(filename, "w", encoding="utf-8") as f:
+                        json.dump(variations, f, indent=4, ensure_ascii=False)
+                    print(f"Saved variations for product {product['id']}")
+                
+                except Exception as e:
+                    print(f"Error processing product {product['id']}: {str(e)}")
+                    
+            count += 1

@@ -6,6 +6,7 @@ from datetime import datetime
 from app.config import settings
 from app.models.oauth import OAuth
 from app.models.category import Category, CategoryBase
+from app.models.customer import Customer, CustomerBase
 
 class PostgresAgent:
     def __init__(self):
@@ -76,6 +77,24 @@ class PostgresAgent:
     async def get_category_by_woo_id(self, woo_id: int):
         async for db in self.get_session():
             statement = select(Category).where(Category.woo_id == woo_id)
+            result = (await db.exec(statement)).first()
+            return result
+        return None
+    
+    async def insert_customer(self, customer: CustomerBase):
+        async for db in self.get_session():
+            db_customer = Customer(
+                contact_name=customer.contact_name,
+                woo_id=customer.woo_id,
+                zoho_id=customer.zoho_id
+            )
+            db.add(db_customer)
+            await db.commit()
+            await db.refresh(db_customer)
+    
+    async def get_customer_by_woo_id(self, woo_id: int):
+        async for db in self.get_session():
+            statement = select(Customer).where(Customer.woo_id == woo_id)
             result = (await db.exec(statement)).first()
             return result
         return None

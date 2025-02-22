@@ -3,24 +3,27 @@ from app.schemas.item_group import ItemGroup, Item, Attribute
 from app.agents.postgres import PostgresAgent
 from app.agents.zoho import ZohoAgent
 from bs4 import BeautifulSoup
-
+import unicodedata
 async def create_item_groups():
-    count = 1
-    limit_exceeded = False
-    
-    while True:
-        if limit_exceeded:
-            break
+    try:
+        print("Starting item group creation")
+        
+        filename = f"variable_products/products_9.json"
+        
         try:
-            filename = f"variable_products/products_{count}.json"
-            if not os.path.exists(filename):
-                break
-            
             with open(filename, 'r') as f:
                 products = json.load(f)
-            count += 1  # Increment counter after processing each file
-                
-            for product in products:
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            print(f"Error loading products file: {str(e)}")
+            return
+        
+        failed_count = 0
+        success_count = 0
+        for product in products:
+            if product['attributes'] == []:
+                continue
+            
+            try:
                 category = None  # Initialize category
                 if len(product["categories"]) > 0:
                     category_woo_id = product["categories"][0]["id"]
@@ -29,17 +32,27 @@ async def create_item_groups():
                 if category:
                     category_id = category.zoho_id
                 else:
-                    category_id = "-1"
+                    category_id = ""
                     
                 group_items = []
                 item_filename = f"variations/variations_{product['id']}.json"
                 if not os.path.exists(item_filename):
+                    print(f"Variations file not found for product ID: {product.get('id')}")
                     continue
-                with open(item_filename, 'r') as f:
-                    items = json.load(f)
+                
+                try:
+                    with open(item_filename, 'r') as f:
+                        items = json.load(f)
+                except (FileNotFoundError, json.JSONDecodeError) as e:
+                    print(f"Error loading variations file for product {product.get('id')}: {str(e)}")
+                    failed_count += 1
+                    continue
                 
                 item_images_list = []
                 for item in items:
+                    if len(item['attributes']) == 0:
+                        continue
+                    
                     try:
                         stock_qty = float(item["stock_quantity"])
                         stock_qty = max(0.0, stock_qty)
@@ -63,6 +76,14 @@ async def create_item_groups():
                         item_name = product.get("name", "Unknown Product")
                         print(f"Error creating item name for product ID {product.get('id', 'unknown')}: Missing or invalid attributes")
                     
+                    existing_skus = [item.sku for item in group_items]
+                    
+                    current_sku = item.get('sku', '')
+                    if current_sku == "" or current_sku in existing_skus:
+                        sku = f'{current_sku}-ER-{item["id"]}'
+                    else:
+                        sku = current_sku
+                    
                     single_item = Item(
                         name=item_name,
                         rate=price,
@@ -72,12 +93,12 @@ async def create_item_groups():
                         stock_on_hand=float(stock_qty),
                         available_stock=float(available_stock),
                         actual_available_stock=float(available_stock),
-                        sku=item.get('sku', ''),
+                        sku=sku,
                         attribute_option_name1=item.get('attributes', [{}])[0].get('option', ''),
                     )
                     
                     item_images = {
-                        "sku": item['sku'],
+                        "sku": sku,
                         "images": [item["image"]]
                     }
                     
@@ -94,21 +115,19 @@ async def create_item_groups():
                         options=[{"name": option_name[:99]} for option_name in attribute["options"]]  # Also truncate options
                     ))
                 
-                if len(product["brands"]) > 0:
-                    brand = product["brands"][0]["name"][:99]  # Truncate brand name
-                else:
-                    brand = "Eagle Fishing"
+                brand = product["brands"][0]["name"] if product["brands"] else "Eagle Fishing"
                 
-                if product["description"]:
-                    soup = BeautifulSoup(product["description"], 'html.parser')
-                    plain_description = soup.get_text(separator=' ').strip()
-                    truncated_description = plain_description[:2000]
-                elif product["short_description"]:
-                    soup = BeautifulSoup(product["short_description"], 'html.parser')
-                    plain_description = soup.get_text(separator=' ').strip()
-                    truncated_description = plain_description[:2000]
-                else:
-                    truncated_description = ""
+                def clean_description(text):
+                    if not text:
+                        return "No Description"
+                    # Remove HTML and clean text
+                    plain_text = BeautifulSoup(text, 'html.parser').get_text(separator=' ', strip=True)
+                    plain_text = ' '.join(plain_text.split())
+                    cleaned_text = unicodedata.normalize('NFKD', plain_text).encode('ascii', 'ignore').decode('ascii')
+                    cleaned_text = cleaned_text.replace('<', '').replace('>', '')
+                    return cleaned_text[:2000]
+
+                truncated_description = clean_description(product.get("description") or product.get("short_description"))
                     
                 item_group = ItemGroup(
                     group_name=product.get("name", "Unknown Product"),
@@ -123,37 +142,54 @@ async def create_item_groups():
                     category_id=category_id
                 )
                 
-                result = await ZohoAgent().create_item_group(item_group)
+                try:
+                    result = await ZohoAgent().create_item_group(item_group)
+                except Exception as e:
+                    print(f"Error creating item group for product {product.get('id')}: {str(e)}")
+                    failed_count += 1
+                    continue
+                
+                if result.get("code") == 2:
+                    print(f"invalid description: {truncated_description}")
+                    continue
+                
                 if result.get("limit_exceeded"):
-                    limit_exceeded = True
                     print(f"API limit exceeded. Stopping process.")
-                    break
+                    return
                 
                 if "item_group" not in result:
-                    print(f"Error: Unexpected API response format for {product.get('name', 'Unknown Product')}")
                     print(f"API Response: {result}")
+                    failed_count += 1
                     continue
                 
                 print(f"Created item group: {product['name']} with total items: {len(result['item_group']['items'])}")
-                
+                success_count += 1
                 if len(result["item_group"]["items"]) > 0:
                     print(f"Processing images for {len(result['item_group']['items'])} items in group {product['name']}")
-                    # Create a dictionary for quick SKU lookup
                     sku_to_images = {item_image["sku"]: item_image["images"] for item_image in item_images_list}
                     
                     for item in result["item_group"]["items"]:
-                        item_sku = item.get("sku")
-                        if item_sku and item_sku in sku_to_images:
-                            print(f"Uploading images for SKU: {item_sku}")
-                            image_upload_result = await ZohoAgent().upload_image(sku_to_images[item_sku], item["item_id"])
-                            print(f"Image upload result for SKU {item_sku}")
-                        else:
-                            print(f"No images found for SKU: {item_sku}")
-                
-        except Exception as e:
-            print(f"Error processing file {filename}: {str(e)}")
-            # Maybe add a retry mechanism or logging
-            count += 1  # Still increment counter to avoid getting stuck
-            continue
-    
-    print("Done")
+                        try:
+                            item_sku = item.get("sku")
+                            if item_sku and item_sku in sku_to_images:
+                                print(f"Uploading images for SKU: {item_sku}")
+                                image_upload_result = await ZohoAgent().upload_image(sku_to_images[item_sku], item["item_id"])
+                                print(f"Image upload result for SKU {item_sku}")
+                            else:
+                                print(f"No images found for SKU: {item_sku}")
+                        except Exception as e:
+                            print(f"Error uploading images for SKU {item_sku}: {str(e)}")
+                            continue
+                            
+            except Exception as e:
+                print(f"Error processing product {product.get('id')}: {str(e)}")
+                failed_count += 1
+                continue
+        
+        print(f"Total products processed: {len(products)}")
+        print(f"Successfully created item groups: {success_count}")
+        print(f"Failed to create item groups: {failed_count}")
+        
+    except Exception as e:
+        print(f"Fatal error in create_item_groups: {str(e)}")
+        raise

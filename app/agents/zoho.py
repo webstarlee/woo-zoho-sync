@@ -2,6 +2,7 @@ import httpx, json, requests, io
 from datetime import datetime, timedelta
 import http.client
 from PIL import Image  # Add this import at the top of the file
+from urllib.parse import urlencode  # Add this import at the top of the file
 
 from app.config import settings
 from app.agents.postgres import PostgresAgent
@@ -9,7 +10,7 @@ from app.models.category import CategoryBase
 from app.schemas.customer import Customer
 from app.schemas.item import Item
 from app.schemas.item_group import ItemGroup
-
+from app.schemas.order import Order
 class ZohoAgent:
     def __init__(self):
         self.access_token = None
@@ -162,12 +163,10 @@ class ZohoAgent:
         return json.loads(json_data)
     
     async def create_customer(self, customer: Customer):
-        print(customer)
         try:
             access_token = await self.get_access_token()
             
             conn = http.client.HTTPSConnection("www.zohoapis.eu")
-            print(customer.billing_address)
             payload = json.dumps({
                 "contact_name": customer.contact_name,
                 "company_name": customer.company_name,
@@ -194,8 +193,6 @@ class ZohoAgent:
                 } for person in customer.contact_persons]
             })
             
-            print(payload)
-            
             headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
             
             conn.request("POST", f"/inventory/v1/contacts?organization_id={settings.ZOHO_ORGANIZATION_ID}", payload, headers)
@@ -203,8 +200,6 @@ class ZohoAgent:
             res = conn.getresponse()
             data = res.read()
             json_data = data.decode('utf-8')  # Convert bytes to string
-            
-            print(json_data)
             return json.loads(json_data)
         
         except KeyError as e:
@@ -433,15 +428,7 @@ class ZohoAgent:
                 "sku": item.sku,
                 "attribute_option_name1": item.attribute_option_name1
             } for item in item_group.items],
-            "attributes": [{
-                "name": attribute.name,
-                "options": [{
-                    "name": option.name
-                } for option in attribute.options]
-            } for attribute in item_group.attributes]
         })
-        
-        print(payload)
         
         headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
         
@@ -455,3 +442,101 @@ class ZohoAgent:
             data = res.read()
             json_data = data.decode('utf-8')
             return json.loads(json_data)
+    
+    async def list_customers(self, first_name: str, last_name: str):
+        access_token = await self.get_access_token()
+        
+        conn = http.client.HTTPSConnection("www.zohoapis.eu")
+        
+        headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
+        
+        # Properly encode query parameters
+        params = {
+            'organization_id': settings.ZOHO_ORGANIZATION_ID,
+            'first_name': first_name,
+            'last_name': last_name
+        }
+        query_params = urlencode(params)
+        
+        conn.request("GET", f"/inventory/v1/contacts?{query_params}", headers=headers)
+        
+        res = conn.getresponse()
+        data = res.read()
+        json_data = data.decode('utf-8')
+        return json.loads(json_data)
+    
+    async def get_orders(self):
+        access_token = await self.get_access_token()
+        
+        conn = http.client.HTTPSConnection("www.zohoapis.eu")
+        
+        headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
+        
+        conn.request("GET", f"/inventory/v1/salesorders?organization_id={settings.ZOHO_ORGANIZATION_ID}", headers=headers)
+        
+        res = conn.getresponse()
+        data = res.read()
+        json_data = data.decode('utf-8')
+        return json.loads(json_data)
+    
+    async def create_order(self, order: Order):
+        try:
+            access_token = await self.get_access_token()
+            
+            conn = http.client.HTTPSConnection("www.zohoapis.eu")
+            
+            # Convert the order to a dictionary and remove None values
+            order_dict = {k: v for k, v in order.model_dump().items() if v is not None}
+            payload = json.dumps(order_dict)
+            
+            headers = {
+                'Authorization': f"Zoho-oauthtoken {access_token}",
+                'Content-Type': 'application/json'  # Add content type header
+            }
+            
+            conn.request("POST", f"/inventory/v1/salesorders?organization_id={settings.ZOHO_ORGANIZATION_ID}", payload, headers)
+            
+            res = conn.getresponse()
+            data = res.read()
+            json_data = data.decode('utf-8')
+            
+            # Add error handling for non-200 responses
+            if res.status >= 400:
+                print(f"Zoho API error: Status {res.status}, Response: {json_data}")
+                return None
+            
+            return json.loads(json_data)
+        except Exception as e:
+            print(f"Error creating order in Zoho: {str(e)}")
+            return None
+    
+    async def mark_order_as_confirmed(self, order_id: str):
+        print(order_id)
+        try:
+            access_token = await self.get_access_token()
+            
+            conn = http.client.HTTPSConnection("www.zohoapis.eu")
+            
+            headers = { 'Authorization': f"Zoho-oauthtoken {access_token}" }
+            
+            conn.request("POST", f"/inventory/v1/salesorders/{order_id}/status/confirmed?organization_id={settings.ZOHO_ORGANIZATION_ID}", headers=headers)
+            
+            res = conn.getresponse()
+            data = res.read()
+            json_data = data.decode('utf-8')
+            
+            if res.status >= 400:
+                print(f"Zoho API error: Status {res.status}, Response: {json_data}")
+                return {"error": f"Failed to confirm order: {json_data}"}
+            
+            return json.loads(json_data)
+            
+        except http.client.HTTPException as e:
+            print(f"HTTP error occurred: {str(e)}")
+            return {"error": f"HTTP error: {str(e)}"}
+        except json.JSONDecodeError as e:
+            print(f"JSON decode error: {str(e)}")
+            return {"error": f"Invalid JSON response: {str(e)}"}
+        except Exception as e:
+            print(f"Unexpected error: {str(e)}")
+            return {"error": f"Unexpected error: {str(e)}"}

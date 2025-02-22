@@ -1,5 +1,6 @@
 import asyncio, json, os
 from woocommerce import API
+from concurrent.futures import ThreadPoolExecutor
 
 from app.agents.postgres import PostgresAgent
 from app.config import settings
@@ -12,7 +13,9 @@ class WcmAgent:
             consumer_key=settings.WCM_CONSUMER_KEY,
             consumer_secret=settings.WCM_CONSUMER_SECRET,
             wp_api=True,
-            version="wc/v3"
+            version="wc/v3",
+            timeout=30,
+            verify=False
         )
         
     async def json_categories(self):
@@ -214,7 +217,8 @@ class WcmAgent:
                     "per_page": per_page,
                     "page": page,
                     "status": "publish",
-                    "type": "simple"
+                    "type": "simple",
+                    "search": "Produkt"
                 }
             )
             
@@ -226,7 +230,7 @@ class WcmAgent:
                 products.extend(current_products)
                 
                 while len(products) >= products_per_file:
-                    filename = f"products/products_{current_file_number}.json"
+                    filename = f"wcm_products/wcm_products_{current_file_number}.json"
                     batch = products[:products_per_file]
                     products = products[products_per_file:]
                     
@@ -243,12 +247,12 @@ class WcmAgent:
         
         # Write any remaining products
         if products:
-            filename = f"products/products_{current_file_number}.json"
+            filename = f"wcm_products/wcm_products_{current_file_number}.json"
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(products, f, indent=4, ensure_ascii=False)
             print(f"Saved {filename}")
             
-        return f"Products saved to products_1.json through products_{current_file_number}.json"
+        return f"Products saved to wcm_products_1.json through wcm_products_{current_file_number}.json"
     
     async def clean_products(self):
         cleaned_products = []
@@ -257,13 +261,15 @@ class WcmAgent:
         products_per_file = 100
         
         while True:
-            if not os.path.exists(f"variable_products/variable_products_{count}.json"):
+            if not os.path.exists(f"wcm_products/wcm_products_{count}.json"):
                 break
             
-            with open(f"variable_products/variable_products_{count}.json", "r") as f:
+            with open(f"wcm_products/wcm_products_{count}.json", "r") as f:
                 products = json.load(f)
             
             for product in products:
+                if product['sku'] == "":
+                    continue
                 # Remove unwanted fields
                 product.pop('meta_data', None)
                 product.pop('yoast_head', None)
@@ -273,7 +279,7 @@ class WcmAgent:
                 
                 # Write to file every 100 products
                 while len(cleaned_products) >= products_per_file:
-                    filename = f"variable_products/products_{current_file_number}.json"
+                    filename = f"wcm_products/cleaned_products_{current_file_number}.json"
                     batch = cleaned_products[:products_per_file]
                     cleaned_products = cleaned_products[products_per_file:]
                     
@@ -287,12 +293,21 @@ class WcmAgent:
         
         # Write any remaining products
         if cleaned_products:
-            filename = f"variable_products/products_{current_file_number}.json"
+            filename = f"wcm_products/cleaned_products_{current_file_number}.json"
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(cleaned_products, f, indent=4, ensure_ascii=False)
             print(f"Saved {filename}")
         
-        return f"Products cleaned and saved to products_1.json through products_{current_file_number}.json"
+        return f"Products cleaned and saved to cleaned_products_1.json through cleaned_products_{current_file_number}.json"
+    
+    async def delete_products_files(self):
+        count = 1
+        while True:
+            if not os.path.exists(f"wcm_products/cleaned_products_{count}.json"):
+                break
+            
+            os.remove(f"wcm_products/cleaned_products_{count}.json")
+            count += 1
     
     async def check_duplicates(self):
         all_products = []
@@ -530,3 +545,207 @@ class WcmAgent:
                     print(f"Error processing product {product['id']}: {str(e)}")
                     
             count += 1
+
+    async def separate_wrong_products(self):
+        count = 1
+        wrong_products = []
+        current_file_number = 1
+        products_per_file = 100
+        
+        while True:
+            file_path = f"wcm_products/wcm_products_{count}.json"
+            if not os.path.exists(file_path):
+                break
+            
+            with open(file_path, "r") as f:
+                products = json.load(f)
+            
+            for product in products:
+                if product["name"] == "Produkt":
+                    print(f"Product {product['id']} is a wrong product")
+                    wrong_products.append(product)
+                    
+                    # Write to file every 100 products
+                    while len(wrong_products) >= products_per_file:
+                        filename = f"wrong_products/wrong_products_{current_file_number}.json"
+                        batch = wrong_products[:products_per_file]
+                        wrong_products = wrong_products[products_per_file:]
+                        
+                        with open(filename, 'w', encoding='utf-8') as f:
+                            json.dump(batch, f, indent=4, ensure_ascii=False)
+                        
+                        print(f"Saved {filename}")
+                        current_file_number += 1
+            
+            count += 1
+        
+        # Write any remaining products
+        if wrong_products:
+            filename = f"wrong_products/wrong_products_{current_file_number}.json"
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(wrong_products, f, indent=4, ensure_ascii=False)
+            print(f"Saved {filename}")
+            
+        return f"Wrong products saved to wrong_products_1.json through wrong_products_{current_file_number}.json"
+    
+    async def delete_wrong_products(self):
+        try:
+            print(self.wcapi.delete("products/118506", params={"force": True}).json())
+        except Exception as e:
+            print(e)
+        return
+    
+        count = 1
+        deleted_count = 0
+        error_count = 0
+        executor = ThreadPoolExecutor()
+
+        while True:
+            file_path = f"wrong_products/wrong_products_{count}.json"
+            if not os.path.exists(file_path):
+                break
+
+            try:
+                with open(file_path, "r") as f:
+                    products = json.load(f)
+
+                for product in products:
+                    if product["name"] == "Produkt":
+                        max_retries = 3
+                        retry_count = 0
+
+                        while retry_count < max_retries:
+                            try:
+                                print(f"Deleting product {product['id']} (attempt {retry_count + 1})")
+
+                                # Run blocking `wcapi.delete(...)` in a separate thread
+                                loop = asyncio.get_running_loop()
+                                result = await loop.run_in_executor(
+                                    executor, lambda: self.wcapi.delete(f"products/{product['id']}", params={"force": True})
+                                )
+                                
+                                print(f"Response Status: {result.status_code}")
+                                print(f"Response Headers: {result.headers}")
+                                print(f"Response Text: {result.text}")
+
+                                if result.status_code == 200:
+                                    deleted_count += 1
+                                    print(f"Successfully deleted product {product['id']}")
+                                    await asyncio.sleep(2)  # Short delay after successful deletion
+                                    break
+                                else:
+                                    print(f"Failed to delete product {product['id']}: Status {result.status_code}")
+                                    await asyncio.sleep(5)  # Longer delay on failure
+                                    retry_count += 1
+
+                            except Exception as e:
+                                print(f"Error deleting product {product['id']}: {str(e)}")
+                                await asyncio.sleep(10)  # Longer delay on connection error
+                                retry_count += 1
+                                continue
+
+                        if retry_count == max_retries:
+                            error_count += 1
+                            print(f"Failed to delete product {product['id']} after {max_retries} attempts")
+
+            except Exception as e:
+                print(f"Error reading file {file_path}: {str(e)}")
+
+            count += 1
+
+        return f"Process completed. Successfully deleted {deleted_count} products. Encountered {error_count} errors."
+
+    async def post_test(self):
+        data = {
+            "name": "Clothing daniellee",
+            "image": {
+                "src": "http://demo.woothemes.com/woocommerce/wp-content/uploads/sites/56/2013/06/T_2_front.jpg"
+            }
+        }
+
+        print(self.wcapi.post("products/categories", data).json())
+        
+    async def delete_cat_test(self):
+        max_retries = 5  # Increased retries
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                # Add delay with exponential backoff
+                await asyncio.sleep(2 ** retry_count)  # 1, 2, 4, 8, 16 seconds
+                
+                print(f"Attempt {retry_count + 1}: Trying to delete category 5248")
+                response = self.wcapi.delete(
+                    "products/categories/5248",
+                    params={
+                        "force": True,
+                    }
+                )
+                
+                if response.status_code == 200:
+                    print("Successfully deleted category")
+                    print(response.json())
+                    return
+                else:
+                    print(f"Failed with status code: {response.status_code}")
+                    print(f"Response: {response.text}")
+                
+            except ConnectionError as e:
+                print(f"Connection error on attempt {retry_count + 1}: {str(e)}")
+            except Exception as e:
+                print(f"Unexpected error on attempt {retry_count + 1}: {str(e)}")
+            
+            retry_count += 1
+                
+        print("Failed to delete category after maximum retries")
+        return
+    
+    async def get_orders(self):
+        orders = []
+        page = 1
+        per_page = 20
+        current_file_number = 1
+        orders_per_file = 100
+        
+        while True:
+            response = self.wcapi.get(
+                "orders",
+                params={
+                    "per_page": per_page,
+                    "page": page,
+                    "status": "completed"
+                }
+            )
+            
+            if response.status_code == 200:
+                current_orders = response.json()
+                if not current_orders:  # If no more orders are returned
+                    break
+                
+                orders.extend(current_orders)
+                
+                # Write to file every 100 orders
+                while len(orders) >= orders_per_file:
+                    filename = f"orders/orders_{current_file_number}.json"
+                    batch = orders[:orders_per_file]
+                    orders = orders[orders_per_file:]
+                    
+                    with open(filename, 'w', encoding='utf-8') as f:
+                        json.dump(batch, f, indent=4, ensure_ascii=False)
+                    
+                    print(f"Saved {filename}")
+                    current_file_number += 1
+                
+                page += 1
+            else:
+                await asyncio.sleep(1)
+                continue
+        
+        # Write any remaining orders
+        if orders:
+            filename = f"orders/orders_{current_file_number}.json"
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(orders, f, indent=4, ensure_ascii=False)
+            print(f"Saved {filename}")
+            
+        return f"Orders saved to orders_1.json through orders_{current_file_number}.json"

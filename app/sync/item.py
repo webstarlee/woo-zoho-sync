@@ -46,11 +46,15 @@ async def create_items():
                     if product["description"]:
                         soup = BeautifulSoup(product["description"], 'html.parser')
                         plain_description = soup.get_text(separator=' ').strip()
-                        truncated_description = plain_description[:2000]
+                        # Clean text of emojis and invalid characters
+                        cleaned_description = unicodedata.normalize('NFKD', plain_description).encode('ascii', 'ignore').decode('ascii')
+                        truncated_description = cleaned_description[:2000]
                     elif product["short_description"]:
                         soup = BeautifulSoup(product["short_description"], 'html.parser')
                         plain_description = soup.get_text(separator=' ').strip()
-                        truncated_description = plain_description[:2000]
+                        # Clean text of emojis and invalid characters
+                        cleaned_description = unicodedata.normalize('NFKD', plain_description).encode('ascii', 'ignore').decode('ascii')
+                        truncated_description = cleaned_description[:2000]
                     else:
                         truncated_description = ""
                     

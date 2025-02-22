@@ -4,16 +4,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from app.agents.zoho import ZohoAgent
 from app.config import settings
-from app.sync.item import sync_unsynced_items
-from app.sync.item_group import create_item_groups
+from app.sync.customer import sync_customers
 from app.agents.wcm import WcmAgent
+from app.sync.order import sync_orders, sync_order_one
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    variable_products_task = asyncio.create_task(create_item_groups())
-    app.state.variable_products_task = variable_products_task
+    orders_task = asyncio.create_task(sync_orders())
+    app.state.orders_task = orders_task
     yield
-    variable_products_task.cancel()
+    orders_task.cancel()
 
 app = FastAPI(lifespan=lifespan)
 
@@ -82,6 +82,18 @@ async def get_item_groups():
 @app.get("/item/{item_id}")
 async def get_item(item_id: str):
     result = await ZohoAgent().get_item_by_id(item_id)
+    
+    return result
+
+@app.get("/customers")
+async def get_customers(text: str):
+    result = await ZohoAgent().list_customers(text)
+    
+    return result
+
+@app.get("/orders")
+async def get_orders():
+    result = await ZohoAgent().get_orders()
     
     return result
 
